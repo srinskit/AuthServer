@@ -9,31 +9,50 @@
 #include <list>
 #include <queue>
 #include <experimental/filesystem>
-#include "Crypt/Crypt.h"
+#include <arpa/inet.h>
+#include "Crypt.h"
 
-#define AS_PORT 8080
+#define AS_PORT 8000
 namespace fs = std::experimental::filesystem;
 sig_atomic_t volatile shutdown_signaled = 0;
+Crypt myCrypt;
+SecureSock::Server server(&myCrypt);
+
+void split(const std::string &str, char ch, std::vector<std::string> &res) {
+    unsigned long i = std::string::npos, prev_i;
+    do {
+        ++i;
+        prev_i = i;
+        i = str.find_first_of(ch, prev_i);
+        res.push_back(str.substr(prev_i, i - prev_i));
+    } while (i < str.length());
+}
+
+
+void process(int from, const std::string &buff) {
+    std::cout << buff << std::endl;
+    std::vector<std::string> res;
+    split(buff, ';', res);
+    if (res[0] == "R_PUB") {
+        std::string raw_cert = buff.substr(res[0].length() + res[1].length() + 2);
+        if (!myCrypt.certify_string(raw_cert, res[1]))
+            return;
+        server.write(from, "true");
+        printf("R_PUB %s successful\n", res[1].c_str());
+    }
+}
 
 void mySigIntHandler(__attribute__((unused))int sig) {
     shutdown_signaled = 1;
+    server.close();
 }
 
 std::list<int> *descriptors = nullptr;
 std::queue<int> *accept_queue = nullptr;
 
 void *core(void *_) {
-    Crypt myCrypt;
-    myCrypt.load_private_key("../CryptDocs/AuthServer.key", "");
-    myCrypt.add_cert("self", "../CryptDocs/AuthServer.crt");
-    fs::path path;
-    path = "../Certificates";
-    for (auto &p : fs::directory_iterator(path)) {
-        auto pth = fs::path(p);
-        myCrypt.add_cert(pth.stem(), pth.c_str());
-    }
-    char buffer[1024];
-    int max_descriptor = 0, num_clients;
+    std::string buff;
+    int max_descriptor = 0;
     fd_set read_set, err_set;
     timeval timeout{0, 100000};
     while (!shutdown_signaled) {
@@ -62,13 +81,14 @@ void *core(void *_) {
             ++it;
             if (FD_ISSET(fd, &read_set)) {
                 ssize_t ret;
-                if ((ret = read(fd, buffer, sizeof(buffer))) < 0) {
+                buff.clear();
+                if ((ret = server.read(fd, buff)) < 0) {
                     perror("read");
                 } else if (ret == 0) {
                     descriptors->remove(fd);
                     printf("A client disconnected\n");
                 } else {
-                    printf("%s\n", buffer);
+                    process(fd, buff);
                 }
             }
         }
@@ -78,46 +98,44 @@ void *core(void *_) {
 
 int main(int argc, char const *argv[]) {
     signal(SIGINT, mySigIntHandler);
+    signal(SIGTERM, mySigIntHandler);
+    int client_fd;
+    myCrypt.initialize("AUS");
+    myCrypt.add_cert("root", getenv("ROSS_ROOT_CA"));
+    std::string root_ca = getenv("ROOT_CA_DIR");
+    myCrypt.load_private_key(root_ca + "AuthServer/AuthServer.key", "");
+    myCrypt.load_my_cert((root_ca + "AuthServer/AuthServer.crt").c_str(), true);
+    myCrypt.add_cert("root", (root_ca + "srinskitCA.pem").c_str());
+    myCrypt.add_cert("source1", (root_ca + "source1/source1.crt").c_str());
+    myCrypt.add_cert("source2", (root_ca + "source2/source2.crt").c_str());
+    myCrypt.add_cert("source3", (root_ca + "source3/source3.crt").c_str());
+    if (!(server.init() && server.bind(AS_PORT) && server.listen())) {
+        printf("Could not start server\n");
+        myCrypt.terminate();
+        return EXIT_FAILURE;
+    }
     descriptors = new std::list<int>();
     accept_queue = new std::queue<int>();
-    int server_fd, new_socket;
-    sockaddr_in address{};
-    int opt = 1;
-    int address_len = sizeof(address);
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
-        perror("socket");
-        exit(EXIT_FAILURE);
-    }
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
-    }
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(AS_PORT);
-    if (bind(server_fd, (struct sockaddr *) &address, sizeof(address)) < 0) {
-        perror("bind");
-        exit(EXIT_FAILURE);
-    }
-    if (listen(server_fd, 5) < 0) {
-        perror("listen");
-        exit(EXIT_FAILURE);
-    }
     pthread_t pthread;
     pthread_create(&pthread, nullptr, core, nullptr);
     while (!shutdown_signaled) {
-        if ((new_socket = accept(server_fd, (struct sockaddr *) &address, (socklen_t *) &address_len)) < 0) {
-            if (shutdown_signaled)
-                break;
-            perror("accept");
-            exit(EXIT_FAILURE);
+        if ((client_fd = server.accept()) < 0) {
+            break;
         }
-        accept_queue->push(new_socket);
+        if (shutdown_signaled) break;
+        accept_queue->push(client_fd);
     }
     pthread_join(pthread, nullptr);
     delete (descriptors);
     delete (accept_queue);
+    myCrypt.terminate();
     return 0;
 }
 
-//    send(new_socket, hello.c_str(), hello.length(), 0);
+
+//    fs::path path;
+//    path = "../Certificates";
+//    for (auto &p : fs::directory_iterator(path)) {
+//        auto pth = fs::path(p);
+//        myCrypt.add_cert(pth.stem(), pth.c_str());
+//    }
