@@ -110,7 +110,7 @@ int main(int argc, char const *argv[]) {
     myCrypt.add_cert("root", getenv("ROSS_ROOT_CA"));
     std::string root_ca = getenv("ROOT_CA_DIR");
     myCrypt.load_private_key(root_ca + "AuthServer/AuthServer.key", "");
-    myCrypt.load_my_cert((root_ca + "AuthServer/AuthServer.crt").c_str(), true);
+    myCrypt.load_my_cert(root_ca + "AuthServer/AuthServer.crt", true);
     myCrypt.add_cert("root", (root_ca + "srinskitCA.pem").c_str());
     myCrypt.add_cert("source1", (root_ca + "source1/source1.crt").c_str());
     myCrypt.add_cert("source2", (root_ca + "source2/source2.crt").c_str());
