@@ -17,6 +17,8 @@ namespace fs = std::experimental::filesystem;
 sig_atomic_t volatile shutdown_signaled = 0;
 Crypt myCrypt;
 SecureSock::Server server(&myCrypt);
+std::map<std::string, std::string> topic_datatype_map;
+std::map<std::string, std::string> topic_key_map;
 
 void split(const std::string &str, char ch, std::vector<std::string> &res) {
     unsigned long i = std::string::npos, prev_i;
@@ -28,17 +30,21 @@ void split(const std::string &str, char ch, std::vector<std::string> &res) {
     } while (i < str.length());
 }
 
-
 void process(int from, const std::string &buff) {
     std::cout << buff << std::endl;
     std::vector<std::string> res;
     split(buff, ';', res);
-    if (res[0] == "R_PUB") {
-        std::string raw_cert = buff.substr(res[0].length() + res[1].length() + 2);
-        if (!myCrypt.certify_string(raw_cert, res[1]))
-            return;
-        server.write(from, "true");
-        printf("R_PUB %s successful\n", res[1].c_str());
+    if (res[0] == "REG_PUB") {
+        std::string key;
+        if (topic_datatype_map.find(res[1]) == topic_datatype_map.end()) {
+            topic_datatype_map[res[1]] = res[2];
+            myCrypt.gen_aes_key(key);
+            topic_key_map[res[1]] = key;
+        } else {
+            key = topic_key_map[res[1]];
+        }
+        server.write(from, key);
+        printf("REG_PUB %s successful\n", res[1].c_str());
     }
 }
 
@@ -54,7 +60,6 @@ void *core(void *_) {
     std::string buff;
     int max_descriptor = 0;
     fd_set read_set, err_set;
-    timeval timeout{0, 100000};
     while (!shutdown_signaled) {
         // Following while is the only critical section
         // Done to guarantee 'descriptors' is unchanged after select
@@ -70,6 +75,7 @@ void *core(void *_) {
             FD_SET(fd, &read_set);
             FD_SET(fd, &err_set);
         }
+        timeval timeout{0, 100000};
         auto sret = select(max_descriptor + 1, &read_set, nullptr, &err_set, &timeout);
         if (shutdown_signaled || sret <= 0)
             continue;
