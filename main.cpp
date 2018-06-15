@@ -17,8 +17,6 @@ namespace fs = std::experimental::filesystem;
 sig_atomic_t volatile shutdown_signaled = 0;
 Crypt myCrypt;
 SecureSock::Server server(&myCrypt);
-std::map<std::string, std::string> topic_datatype_map;
-std::map<std::string, std::string> topic_key_map;
 
 void split(const std::string &str, char ch, std::vector<std::string> &res) {
     unsigned long i = std::string::npos, prev_i;
@@ -35,16 +33,21 @@ void process(int from, const std::string &buff) {
     std::vector<std::string> res;
     split(buff, ';', res);
     if (res[0] == "REG_PUB") {
+        // REG_PUB; topic
         std::string key;
-        if (topic_datatype_map.find(res[1]) == topic_datatype_map.end()) {
-            topic_datatype_map[res[1]] = res[2];
-            myCrypt.gen_aes_key(key);
-            topic_key_map[res[1]] = key;
-        } else {
-            key = topic_key_map[res[1]];
+        if (!myCrypt.aes_get_key(res[1], key)) {
+            myCrypt.aes_gen_key(key);
+            myCrypt.aes_save_key(res[1], key);
         }
         server.write(from, key);
-        printf("REG_PUB %s successful\n", res[1].c_str());
+    } else if (res[0] == "REG_SUB") {
+        // REG_SUB; topic
+        std::string key;
+        if (!myCrypt.aes_get_key(res[1], key)) {
+            myCrypt.aes_gen_key(key);
+            myCrypt.aes_save_key(res[1], key);
+        }
+        server.write(from, key);
     }
 }
 
