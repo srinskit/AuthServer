@@ -110,15 +110,12 @@ int main(int argc, char const *argv[]) {
     signal(SIGTERM, mySigIntHandler);
     int client_fd;
     myCrypt.initialize("AUS");
+    std::string root_ca_dir = getenv("ROOT_CA_DIR");
     myCrypt.add_cert("root", getenv("ROSS_ROOT_CA"));
-    std::string root_ca = getenv("ROOT_CA_DIR");
-    myCrypt.load_private_key(root_ca + "AuthServer/AuthServer.key", "");
-    myCrypt.load_my_cert(root_ca + "AuthServer/AuthServer.crt", true);
-    myCrypt.add_cert("root", (root_ca + "srinskitCA.pem").c_str());
-    myCrypt.add_cert("source1", (root_ca + "source1/source1.crt").c_str());
-    myCrypt.add_cert("source2", (root_ca + "source2/source2.crt").c_str());
-    myCrypt.add_cert("source3", (root_ca + "source3/source3.crt").c_str());
-    if (!(server.init() && server.bind(AS_PORT) && server.listen())) {
+    myCrypt.add_cert("source1", root_ca_dir + "source1/source1.crt");
+    myCrypt.load_private_key(root_ca_dir + "AuthServer/AuthServer.key", "");
+    myCrypt.load_my_cert(root_ca_dir + "AuthServer/AuthServer.crt", "", true);
+    if (!(server.init() && server.bind(AS_PORT) && server.listen("root", true))) {
         printf("Could not start server\n");
         myCrypt.terminate();
         return EXIT_FAILURE;
@@ -129,7 +126,7 @@ int main(int argc, char const *argv[]) {
     pthread_create(&pthread, nullptr, core, nullptr);
     while (!shutdown_signaled) {
         if ((client_fd = server.accept()) < 0) {
-            break;
+            continue;
         }
         if (shutdown_signaled) break;
         accept_queue->push(client_fd);
