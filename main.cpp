@@ -110,11 +110,11 @@ int main(int argc, char const *argv[]) {
     signal(SIGTERM, mySigIntHandler);
     int client_fd;
     myCrypt.initialize("AUS");
-    std::string root_ca_dir = getenv("ROOT_CA_DIR");
-    myCrypt.add_cert("root", getenv("ROSS_ROOT_CA"));
-    myCrypt.add_cert("source1", root_ca_dir + "source1/source1.crt");
-    myCrypt.load_private_key(root_ca_dir + "AuthServer/AuthServer.key", "");
-    myCrypt.load_my_cert(root_ca_dir + "AuthServer/AuthServer.crt", "", true);
+    const std::string root_ca_dir = getenv("ROOT_CA_DIR");
+    myCrypt.add_cert("root", root_ca_dir + "root/rootca.crt");
+    myCrypt.add_cert("S1", root_ca_dir + "inter/S1/S1.crt");
+    myCrypt.load_my_key(root_ca_dir + "enduser/AuthServer/AuthServer.key", "");
+    myCrypt.load_my_cert(root_ca_dir + "enduser/AuthServer/AuthServer.crt", "S1", true);
     if (!(server.init() && server.bind(AS_PORT) && server.listen("root", true))) {
         printf("Could not start server\n");
         myCrypt.terminate();
